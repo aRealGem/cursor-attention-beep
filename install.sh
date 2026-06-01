@@ -114,21 +114,30 @@ if [[ ! -f "$HOOKS_JSON" ]]; then
   fi
 else
   backup_hooks_json
-  # Merge our v0.2 entries idempotently. For each event we ensure exactly
-  # one entry whose command mentions "attention-beep". Existing user
-  # entries on the same event keys are preserved verbatim.
+  # Merge entries idempotently:
+  #   1. Strip every existing "attention-beep" entry from every event
+  #      list (cleans stale entries from prior versions on event keys we
+  #      no longer install -- e.g. preToolUse from v0.2).
+  #   2. Drop event lists that become empty after the strip.
+  #   3. Add exactly one attention-beep entry per event the current
+  #      template ships.
+  # Existing non-attention-beep entries on any event key are preserved.
   merged="$(jq --slurpfile tmpl "$REPO_DIR/hooks.json" '
     def ensure(key; entry):
-      .hooks[key] = (
-        ((.hooks[key] // []) | map(select(.command | test("attention-beep") | not)))
-        + [entry]
-      );
-    . as $orig
-    | .version = (.version // 1)
+      .hooks[key] = ((.hooks[key] // []) + [entry]);
+    .version = (.version // 1)
     | .hooks = (.hooks // {})
+    # 1+2: scrub every existing attention-beep entry, drop empties.
+    | .hooks = (
+        .hooks
+        | to_entries
+        | map(.value |= ((. // []) | map(select(.command | test("attention-beep") | not))))
+        | map(select(.value | length > 0))
+        | from_entries
+      )
+    # 3: re-add exactly the entries this template ships.
     | ensure("stop";                 $tmpl[0].hooks.stop[0])
     | ensure("beforeShellExecution"; $tmpl[0].hooks.beforeShellExecution[0])
-    | ensure("preToolUse";           $tmpl[0].hooks.preToolUse[0])
     | ensure("beforeMCPExecution";   $tmpl[0].hooks.beforeMCPExecution[0])
   ' "$HOOKS_JSON")"
 
@@ -144,15 +153,15 @@ fi
 cat <<EOF
 
 ==> done. To verify:
-    1. Open Cursor -> Settings -> Hooks (4 entries should appear:
-       stop, beforeShellExecution, preToolUse, beforeMCPExecution).
+    1. Open Cursor -> Settings -> Hooks (3 entries should appear:
+       stop, beforeShellExecution, beforeMCPExecution).
     2. End an agent turn -- you should hear Sosumi.
     3. Manual tests:
          echo '{"command":"curl https://example.com"}' | $SCRIPT_DST shell  # beep
          echo '{"command":"ls"}'                       | $SCRIPT_DST shell  # silent
          $SCRIPT_DST stop </dev/null                                        # beep
-         $SCRIPT_DST edit </dev/null                                        # beep
          $SCRIPT_DST mcp  </dev/null                                        # beep
+         $SCRIPT_DST edit </dev/null                                        # beep (only if you opt in -- see README)
 
 ==> turn parts off via env vars in your shell profile:
       ATTENTION_BEEP_DISABLE=1         # master kill switch

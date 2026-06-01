@@ -3,7 +3,8 @@
 A small, observe-only Cursor hook that plays a macOS system sound whenever the
 agent might need your attention: end of a turn, a likely-gated shell command
 (`curl`, `ssh`, `sudo`, package managers, anything with an `http(s)://` URL),
-a file edit attempt, or an MCP tool call.
+or an MCP tool call. Edit-gate coverage is available as a one-snippet opt-in
+because it tends to fire on every auto-accepted edit too.
 
 It is intentionally small (one shell script, one JSON file) and **never prints
 a permission decision**, so Cursor's normal approval prompts are unchanged. The
@@ -27,7 +28,7 @@ How it differs from neighbors:
 | [`NazarenoL/cursor-but-fun`](https://github.com/NazarenoL/cursor-but-fun) | Cursor | yes | switches apps to a game while you wait |
 | [`beautyfree/cursor-activate-hook`](https://github.com/beautyfree/cursor-window-activate-hook) | Cursor | yes | window focus, not sound |
 | [`fsalmons/claude-chime`](https://github.com/fsalmons/claude-chime), [`EryouHao/claude-code-sound-notification`](https://github.com/EryouHao/claude-code-sound-notification), [`ChanMeng666/claude-code-audio-hooks`](https://github.com/ChanMeng666/claude-code-audio-hooks) | Claude Code | no | mature, Claude-only |
-| **cursor-attention-beep** | Cursor only | n/a | minimal, single sound, observe-only, broad coverage with per-event toggles |
+| **cursor-attention-beep** | Cursor only | n/a | minimal, single sound, observe-only; turn-end + network-shell + MCP by default, edit-gates opt-in |
 
 If you want voice packs / multi-IDE support / dashboards, use PeonPing. If you
 want one short script that pings when it probably matters and stays out of
@@ -36,23 +37,55 @@ the way otherwise, use this.
 ## Coverage
 
 Cursor has no "approval prompt shown" event, so this hook listens on the
-events that come closest. Each one is independently toggleable.
+events that come closest. The defaults are tuned to "high signal, low
+chatter" -- everything that ships on by default beeps either once per turn
+or once per gated/sensitive call. Edit-gate coverage is an opt-in (see
+below) because in practice it fires on every auto-accepted edit too.
 
 | Event | Mode | When it beeps | Default |
 | --- | --- | --- | --- |
-| `stop` | `stop` | Agent finishes a turn | on |
+| `stop` | `stop` | Agent finishes a turn (including when it ends because it can't proceed without your input) | on |
 | `beforeShellExecution` | `shell` | About to run a shell command whose `.command` matches the network/elevated regex (`curl`, `wget`, `ssh`, `scp`, `sftp`, `rsync`, `nc`, `ncat`, `telnet`, `sudo`, `git`, `npm`, `pnpm`, `yarn`, `pip`, `pip3`, `uv`, `brew`, `apt`, `apt-get`, `docker`, `dig`, `ping`, `nslookup`, `host`, or any `http(s)://` URL) | on |
-| `preToolUse` | `edit` | About to use `Write` / `Edit` / `MultiEdit` / `StrReplace` / `EditNotebook` (matcher in `hooks.json`) | on |
 | `beforeMCPExecution` | `mcp` | About to call an MCP tool | on |
-
-The `preToolUse` and `beforeMCPExecution` events in Cursor fire before *every*
-matched invocation, not only ones that pause for approval. In practice that
-mostly maps to "things you'd want to know about anyway" — but if your
-workspace has auto-accept on and you're doing heavy in-workspace edits, the
-edit beep can get chatty. Use the per-event kill switch below.
+| `preToolUse` | `edit` | About to use `Write` / `Edit` / `MultiEdit` / `StrReplace` / `EditNotebook` | **opt-in** -- see below |
 
 The hook writes nothing to stdout, so it returns no `permission` field. Cursor
 falls back to its native approval flow for every event, every time.
+
+### Opt-in: edit-gate coverage
+
+Cursor's `preToolUse` event fires before *every* matched tool invocation,
+whether or not Cursor pauses for your approval. If your workspace has
+auto-accept on for in-workspace edits (Cursor's common default), enabling
+edit coverage means the hook beeps on **every** auto-accepted edit the agent
+makes. That's a lot of noise for sessions where the agent is editing
+heavily.
+
+It's still useful in two cases:
+
+- Your workspace requires manual approval for *all* edits (auto-accept off
+  globally). Then almost every `preToolUse` is a real "accept changes"
+  prompt and the beep is high signal.
+- You routinely watch agents touch paths outside the workspace (e.g.
+  `~/.cursor/`, dotfiles, sibling repos) where approval is always required.
+
+To enable, add this entry to `~/.cursor/hooks.json` under `hooks`:
+
+```json
+"preToolUse": [
+  {
+    "command": "./hooks/attention-beep.sh edit",
+    "matcher": "^(Write|Edit|MultiEdit|StrReplace|EditNotebook)$",
+    "timeout": 5
+  }
+]
+```
+
+If you change your mind later, remove the entry or set
+`ATTENTION_BEEP_DISABLE_EDIT=1` in your shell profile.
+
+The `edit` mode is preserved in `hooks/attention-beep.sh` exactly so this
+opt-in works -- no script changes required.
 
 ## Install
 
@@ -75,8 +108,8 @@ The installer:
 
 Dry-run first if you want: `./install.sh --dry-run`.
 
-Verify in Cursor: **Settings -> Hooks** should list all four entries. End a
-turn -> Sosumi.
+Verify in Cursor: **Settings -> Hooks** should list three entries (`stop`,
+`beforeShellExecution`, `beforeMCPExecution`). End a turn -> Sosumi.
 
 ## Customize
 
@@ -102,8 +135,8 @@ Available system sounds: `Basso`, `Blow`, `Bottle`, `Frog`, `Funk`, `Glass`,
 echo '{"command":"curl https://example.com"}' | ~/.cursor/hooks/attention-beep.sh shell  # beep
 echo '{"command":"ls -la"}'                   | ~/.cursor/hooks/attention-beep.sh shell  # silent
 ~/.cursor/hooks/attention-beep.sh stop </dev/null                                         # beep
-~/.cursor/hooks/attention-beep.sh edit </dev/null                                         # beep
 ~/.cursor/hooks/attention-beep.sh mcp  </dev/null                                         # beep
+~/.cursor/hooks/attention-beep.sh edit </dev/null                                         # beep (mode kept for opt-in users)
 ```
 
 ## Uninstall
