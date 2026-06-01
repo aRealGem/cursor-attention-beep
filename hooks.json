@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      { "command": "./hooks/attention-beep.sh stop", "timeout": 5 }
+    ],
+    "beforeShellExecution": [
+      { "command": "./hooks/attention-beep.sh shell", "timeout": 5 }
+    ]
+  }
+}
