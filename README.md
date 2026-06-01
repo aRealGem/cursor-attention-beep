@@ -1,24 +1,25 @@
 # cursor-attention-beep
 
-A small, observe-only Cursor hook that plays a macOS system sound when the agent
-finishes a turn, or is about to run a likely-gated shell command (`curl`,
-`ssh`, `sudo`, package managers, anything with an `http(s)://` URL, etc.).
+A small, observe-only Cursor hook that plays a macOS system sound whenever the
+agent might need your attention: end of a turn, a likely-gated shell command
+(`curl`, `ssh`, `sudo`, package managers, anything with an `http(s)://` URL),
+a file edit attempt, or an MCP tool call.
 
-It is intentionally small (one shell script, one JSON file) and **never prints a
-permission decision**, so Cursor's normal approval prompts are unchanged. The
+It is intentionally small (one shell script, one JSON file) and **never prints
+a permission decision**, so Cursor's normal approval prompts are unchanged. The
 hook only listens; you still drive the approvals.
 
-Status: alpha. macOS-first. Tested on macOS 25 with Cursor's hook system.
+Status: alpha. macOS-first. Tested with Cursor's hook system on macOS.
 
 ## Why this exists
 
 Cursor has [hooks](https://cursor.com/docs/agent/hooks) but no first-class
-"agent is waiting for input" event. Claude Code has a `Notification` event with
-a `permission_prompt` matcher and a thriving ecosystem of sound-notification
-tools; Cursor does not. This repo fills the obvious gap with the smallest
-useful thing.
+"agent is waiting for input" event. Claude Code has a `Notification` event
+with a `permission_prompt` matcher and a thriving ecosystem of
+sound-notification tools; Cursor does not. This repo fills the obvious gap
+with the smallest useful thing.
 
-The closest existing tools and how this one differs:
+How it differs from neighbors:
 
 | Tool | IDE focus | Cursor support | Style |
 | --- | --- | --- | --- |
@@ -26,42 +27,37 @@ The closest existing tools and how this one differs:
 | [`NazarenoL/cursor-but-fun`](https://github.com/NazarenoL/cursor-but-fun) | Cursor | yes | switches apps to a game while you wait |
 | [`beautyfree/cursor-activate-hook`](https://github.com/beautyfree/cursor-window-activate-hook) | Cursor | yes | window focus, not sound |
 | [`fsalmons/claude-chime`](https://github.com/fsalmons/claude-chime), [`EryouHao/claude-code-sound-notification`](https://github.com/EryouHao/claude-code-sound-notification), [`ChanMeng666/claude-code-audio-hooks`](https://github.com/ChanMeng666/claude-code-audio-hooks) | Claude Code | no | mature, Claude-only |
-| **cursor-attention-beep** | Cursor only | n/a | minimal, single sound, fires only on turn-end + likely-gated shell commands |
+| **cursor-attention-beep** | Cursor only | n/a | minimal, single sound, observe-only, broad coverage with per-event toggles |
 
 If you want voice packs / multi-IDE support / dashboards, use PeonPing. If you
-want one short script that pings only when it probably matters, use this.
+want one short script that pings when it probably matters and stays out of
+the way otherwise, use this.
 
-## How it works
+## Coverage
 
-Two hook entries, both pointing at the same shell script:
+Cursor has no "approval prompt shown" event, so this hook listens on the
+events that come closest. Each one is independently toggleable.
 
-```json
-{
-  "version": 1,
-  "hooks": {
-    "stop": [
-      { "command": "./hooks/attention-beep.sh stop", "timeout": 5 }
-    ],
-    "beforeShellExecution": [
-      { "command": "./hooks/attention-beep.sh shell", "timeout": 5 }
-    ]
-  }
-}
-```
+| Event | Mode | When it beeps | Default |
+| --- | --- | --- | --- |
+| `stop` | `stop` | Agent finishes a turn | on |
+| `beforeShellExecution` | `shell` | About to run a shell command whose `.command` matches the network/elevated regex (`curl`, `wget`, `ssh`, `scp`, `sftp`, `rsync`, `nc`, `ncat`, `telnet`, `sudo`, `git`, `npm`, `pnpm`, `yarn`, `pip`, `pip3`, `uv`, `brew`, `apt`, `apt-get`, `docker`, `dig`, `ping`, `nslookup`, `host`, or any `http(s)://` URL) | on |
+| `preToolUse` | `edit` | About to use `Write` / `Edit` / `MultiEdit` / `StrReplace` / `EditNotebook` (matcher in `hooks.json`) | on |
+| `beforeMCPExecution` | `mcp` | About to call an MCP tool | on |
 
-- `stop` fires once when the agent finishes a turn -> always beeps.
-- `beforeShellExecution` fires before every shell command. The script reads
-  the JSON command from stdin and beeps **only** when the command matches a
-  network/elevated regex (`curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sudo|git|npm|pnpm|yarn|pip|pip3|uv|brew|apt|apt-get|docker|dig|ping|nslookup|host`
-  or contains `http(s)://`). On anything else it is silent.
+The `preToolUse` and `beforeMCPExecution` events in Cursor fire before *every*
+matched invocation, not only ones that pause for approval. In practice that
+mostly maps to "things you'd want to know about anyway" — but if your
+workspace has auto-accept on and you're doing heavy in-workspace edits, the
+edit beep can get chatty. Use the per-event kill switch below.
 
-The shell script writes nothing to stdout, so it returns no `permission`
-decision. Cursor falls back to its default approval flow for every command.
+The hook writes nothing to stdout, so it returns no `permission` field. Cursor
+falls back to its native approval flow for every event, every time.
 
 ## Install
 
-Requirements: macOS, `jq`, `afplay` (built in). All are present on every modern
-Mac except `jq`, which you can install with `brew install jq`.
+Requirements: macOS, `jq`, `afplay` (built in). All present on every modern
+Mac except `jq` (`brew install jq`).
 
 ```bash
 git clone https://github.com/aRealGem/cursor-attention-beep.git
@@ -73,39 +69,32 @@ The installer:
 
 1. Copies `hooks/attention-beep.sh` -> `~/.cursor/hooks/attention-beep.sh` (`chmod +x`).
 2. If `~/.cursor/hooks.json` already exists, backs it up to
-   `hooks.json.<UTC>.bak` and **merges** the two entries in (idempotent;
-   re-running will not add duplicates).
-3. If it does not exist, copies the template.
+   `hooks.json.<UTC>.bak` and **merges** the four entries in (idempotent;
+   re-running won't duplicate them; other hooks in your file are preserved).
+3. If it doesn't exist, copies the template.
 
 Dry-run first if you want: `./install.sh --dry-run`.
 
-Verify in Cursor: **Settings -> Hooks** should list both entries. End an agent
+Verify in Cursor: **Settings -> Hooks** should list all four entries. End a
 turn -> Sosumi.
 
 ## Customize
 
-All knobs are environment variables; set them in your shell profile.
+All knobs are environment variables; set them in your shell profile (e.g.
+`~/.zshrc`).
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `ATTENTION_BEEP_SOUND` | `/System/Library/Sounds/Sosumi.aiff` | Any `.aiff`/`.wav`/`.mp3` path that `afplay` can play |
-| `ATTENTION_BEEP_DISABLE` | unset | If `1`, the hook is a no-op (kill switch) |
+| `ATTENTION_BEEP_DISABLE` | unset | Master kill switch (`=1` -> no-op every event) |
+| `ATTENTION_BEEP_DISABLE_STOP` | unset | Silence turn-end beeps |
+| `ATTENTION_BEEP_DISABLE_SHELL` | unset | Silence network/elevated-shell beeps |
+| `ATTENTION_BEEP_DISABLE_EDIT` | unset | Silence file-edit beeps |
+| `ATTENTION_BEEP_DISABLE_MCP` | unset | Silence MCP-call beeps |
+| `ATTENTION_BEEP_SOUND` | `/System/Library/Sounds/Sosumi.aiff` | Any `.aiff` / `.wav` / `.mp3` path that `afplay` accepts |
 | `ATTENTION_BEEP_PATTERN` | see source | Override the shell-match extended regex entirely |
 
 Available system sounds: `Basso`, `Blow`, `Bottle`, `Frog`, `Funk`, `Glass`,
 `Hero`, `Morse`, `Ping`, `Pop`, `Purr`, `Sosumi`, `Submarine`, `Tink`.
-
-To make it quieter (network-only, no turn-end beep), remove the `stop` entry
-from `~/.cursor/hooks.json`. To make it chattier, drop the regex filter.
-
-## Uninstall
-
-```bash
-./install.sh --uninstall
-```
-
-Removes the script and strips the two entries from `~/.cursor/hooks.json`
-(backed up with a UTC timestamp). Other hooks in that file are preserved.
 
 ## Manual testing
 
@@ -113,62 +102,27 @@ Removes the script and strips the two entries from `~/.cursor/hooks.json`
 echo '{"command":"curl https://example.com"}' | ~/.cursor/hooks/attention-beep.sh shell  # beep
 echo '{"command":"ls -la"}'                   | ~/.cursor/hooks/attention-beep.sh shell  # silent
 ~/.cursor/hooks/attention-beep.sh stop </dev/null                                         # beep
+~/.cursor/hooks/attention-beep.sh edit </dev/null                                         # beep
+~/.cursor/hooks/attention-beep.sh mcp  </dev/null                                         # beep
 ```
 
-## Known gaps and why
+## Uninstall
 
-Cursor has no hook event that fires specifically when an approval prompt is
-shown to the user. (Claude Code has `PermissionRequest` / `Notification` with a
-`permission_prompt` matcher; Cursor does not.) The closest events Cursor
-exposes are:
-
-- `beforeShellExecution` — fires before each shell command. Covered here.
-- `preToolUse` — fires before *every* invocation of a matched tool, whether
-  or not Cursor actually pauses for approval.
-- `beforeMCPExecution` — fires before every MCP tool call, similarly.
-
-So this hook deliberately **does not** beep on:
-
-- "Accept changes" prompts for `Write` / `StrReplace` / `Edit` / `EditNotebook`.
-- MCP tool calls that pause for approval.
-
-Adding `preToolUse(Write|StrReplace|Edit|EditNotebook)` would catch the file
-edit gates, but it would *also* beep on every auto-accepted edit, which in a
-high-throughput session is a lot of noise for no signal. The design choice
-here is "never false-positive" over "best coverage." If your workflow
-manually approves every edit (auto-accept off), the trade-off may flip — add
-this to `~/.cursor/hooks.json` and you'll get edit-gate beeps too:
-
-```json
-{
-  "version": 1,
-  "hooks": {
-    "preToolUse": [
-      {
-        "command": "./hooks/attention-beep.sh stop",
-        "matcher": "^(Write|StrReplace|Edit|EditNotebook)$",
-        "timeout": 5
-      }
-    ],
-    "beforeMCPExecution": [
-      { "command": "./hooks/attention-beep.sh stop", "timeout": 5 }
-    ]
-  }
-}
+```bash
+./install.sh --uninstall
 ```
 
-(`stop` is reused as the mode arg because all those events should just always
-beep — no per-event filter needed.)
-
-If Cursor adds a real `notification` / `permissionRequest` event, this hook
-should switch to it and the trade-off disappears.
+Removes the script and strips every attention-beep entry from
+`~/.cursor/hooks.json` (backed up with a UTC timestamp). Other hooks in that
+file are preserved.
 
 ## Roadmap (no promises)
 
 - Linux / Windows audio backends (`paplay`, `ffplay`, PowerShell `MediaPlayer`).
-- Optional distinct sound per event (turn-end vs network shell).
-- A second hook on `beforeMCPExecution` for MCP-call attention.
+- Optional distinct sound per event (`SOUND_STOP`, `SOUND_SHELL`, `SOUND_EDIT`, `SOUND_MCP`).
 - An optional `terminal-notifier` integration for a banner alongside the sound.
+- If/when Cursor ships a real `notification` / `permissionRequest` event,
+  switch to it and retire the broader event matchers.
 
 If you want any of these, open an issue.
 

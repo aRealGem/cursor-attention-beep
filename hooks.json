@@ -6,6 +6,16 @@
     ],
     "beforeShellExecution": [
       { "command": "./hooks/attention-beep.sh shell", "timeout": 5 }
+    ],
+    "preToolUse": [
+      {
+        "command": "./hooks/attention-beep.sh edit",
+        "matcher": "^(Write|Edit|MultiEdit|StrReplace|EditNotebook)$",
+        "timeout": 5
+      }
+    ],
+    "beforeMCPExecution": [
+      { "command": "./hooks/attention-beep.sh mcp", "timeout": 5 }
     ]
   }
 }

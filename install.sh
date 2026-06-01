@@ -43,22 +43,34 @@ fi
 
 stamp() { date -u +%Y%m%dT%H%M%SZ; }
 
+backup_hooks_json() {
+  local bk="$HOOKS_JSON.$(stamp).bak"
+  if [[ $DRY -eq 1 ]]; then
+    echo "    would back up $HOOKS_JSON -> $bk"
+  else
+    cp "$HOOKS_JSON" "$bk"
+    echo "    backed up $HOOKS_JSON -> $bk"
+  fi
+}
+
 if [[ $UNINSTALL -eq 1 ]]; then
   echo "==> uninstalling"
   if [[ -f "$HOOKS_JSON" ]]; then
-    bk="$HOOKS_JSON.$(stamp).bak"
-    if [[ $DRY -eq 1 ]]; then
-      echo "    would back up $HOOKS_JSON -> $bk"
-    else
-      cp "$HOOKS_JSON" "$bk"
-      echo "    backed up $HOOKS_JSON -> $bk"
-    fi
+    backup_hooks_json
+    # Strip every entry whose command mentions "attention-beep", from
+    # every event list. Then drop empty event lists, then drop empty
+    # hooks/version if the whole thing collapses.
     new="$(jq '
-      .hooks.stop |= ((. // []) | map(select(.command | test("attention-beep") | not)))
-      | .hooks.beforeShellExecution |= ((. // []) | map(select(.command | test("attention-beep") | not)))
-      | .hooks.stop = (if (.hooks.stop // [] | length) == 0 then null else .hooks.stop end)
-      | .hooks.beforeShellExecution = (if (.hooks.beforeShellExecution // [] | length) == 0 then null else .hooks.beforeShellExecution end)
-      | .hooks |= with_entries(select(.value != null))
+      (.hooks // {}) as $h
+      | .hooks = (
+          $h
+          | to_entries
+          | map(
+              .value |= ((. // []) | map(select(.command | test("attention-beep") | not)))
+            )
+          | map(select(.value | length > 0))
+          | from_entries
+        )
     ' "$HOOKS_JSON")"
     if [[ $DRY -eq 1 ]]; then
       echo "    would write to $HOOKS_JSON:"
@@ -101,25 +113,23 @@ if [[ ! -f "$HOOKS_JSON" ]]; then
     echo "    created $HOOKS_JSON"
   fi
 else
-  bk="$HOOKS_JSON.$(stamp).bak"
-  if [[ $DRY -eq 1 ]]; then
-    echo "    would back up $HOOKS_JSON -> $bk"
-  else
-    cp "$HOOKS_JSON" "$bk"
-    echo "    backed up $HOOKS_JSON -> $bk"
-  fi
-
-  # Merge: append our entries iff not already present (matched by command substring).
-  merged="$(jq '
-    def ensure(path; entry):
-      if (getpath(path) // []) | any(.command | test("attention-beep"))
-      then .
-      else setpath(path; ((getpath(path) // []) + [entry]))
-      end;
-    .version = (.version // 1)
+  backup_hooks_json
+  # Merge our v0.2 entries idempotently. For each event we ensure exactly
+  # one entry whose command mentions "attention-beep". Existing user
+  # entries on the same event keys are preserved verbatim.
+  merged="$(jq --slurpfile tmpl "$REPO_DIR/hooks.json" '
+    def ensure(key; entry):
+      .hooks[key] = (
+        ((.hooks[key] // []) | map(select(.command | test("attention-beep") | not)))
+        + [entry]
+      );
+    . as $orig
+    | .version = (.version // 1)
     | .hooks = (.hooks // {})
-    | ensure(["hooks","stop"]; {command: "./hooks/attention-beep.sh stop", timeout: 5})
-    | ensure(["hooks","beforeShellExecution"]; {command: "./hooks/attention-beep.sh shell", timeout: 5})
+    | ensure("stop";                 $tmpl[0].hooks.stop[0])
+    | ensure("beforeShellExecution"; $tmpl[0].hooks.beforeShellExecution[0])
+    | ensure("preToolUse";           $tmpl[0].hooks.preToolUse[0])
+    | ensure("beforeMCPExecution";   $tmpl[0].hooks.beforeMCPExecution[0])
   ' "$HOOKS_JSON")"
 
   if [[ $DRY -eq 1 ]]; then
@@ -134,17 +144,24 @@ fi
 cat <<EOF
 
 ==> done. To verify:
-    1. Open Cursor -> Settings -> Hooks (the entries should appear).
+    1. Open Cursor -> Settings -> Hooks (4 entries should appear:
+       stop, beforeShellExecution, preToolUse, beforeMCPExecution).
     2. End an agent turn -- you should hear Sosumi.
-    3. To test manually:
-         echo '{"command":"curl https://example.com"}' | $SCRIPT_DST shell    # beep
-         echo '{"command":"ls"}'                       | $SCRIPT_DST shell    # silent
-         $SCRIPT_DST stop </dev/null                                          # beep
+    3. Manual tests:
+         echo '{"command":"curl https://example.com"}' | $SCRIPT_DST shell  # beep
+         echo '{"command":"ls"}'                       | $SCRIPT_DST shell  # silent
+         $SCRIPT_DST stop </dev/null                                        # beep
+         $SCRIPT_DST edit </dev/null                                        # beep
+         $SCRIPT_DST mcp  </dev/null                                        # beep
 
-==> customize via env vars (set in your shell profile):
+==> turn parts off via env vars in your shell profile:
+      ATTENTION_BEEP_DISABLE=1         # master kill switch
+      ATTENTION_BEEP_DISABLE_STOP=1    # silence turn-end beeps
+      ATTENTION_BEEP_DISABLE_SHELL=1   # silence shell beeps
+      ATTENTION_BEEP_DISABLE_EDIT=1    # silence file-edit beeps
+      ATTENTION_BEEP_DISABLE_MCP=1     # silence MCP-call beeps
       ATTENTION_BEEP_SOUND=/System/Library/Sounds/Glass.aiff
-      ATTENTION_BEEP_DISABLE=1
-      ATTENTION_BEEP_PATTERN='your-extended-regex'
+      ATTENTION_BEEP_PATTERN='your-extended-regex'   # shell-only
 
 ==> uninstall:
       ./install.sh --uninstall
