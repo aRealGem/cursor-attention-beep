@@ -115,6 +115,54 @@ echo '{"command":"ls -la"}'                   | ~/.cursor/hooks/attention-beep.s
 ~/.cursor/hooks/attention-beep.sh stop </dev/null                                         # beep
 ```
 
+## Known gaps and why
+
+Cursor has no hook event that fires specifically when an approval prompt is
+shown to the user. (Claude Code has `PermissionRequest` / `Notification` with a
+`permission_prompt` matcher; Cursor does not.) The closest events Cursor
+exposes are:
+
+- `beforeShellExecution` — fires before each shell command. Covered here.
+- `preToolUse` — fires before *every* invocation of a matched tool, whether
+  or not Cursor actually pauses for approval.
+- `beforeMCPExecution` — fires before every MCP tool call, similarly.
+
+So this hook deliberately **does not** beep on:
+
+- "Accept changes" prompts for `Write` / `StrReplace` / `Edit` / `EditNotebook`.
+- MCP tool calls that pause for approval.
+
+Adding `preToolUse(Write|StrReplace|Edit|EditNotebook)` would catch the file
+edit gates, but it would *also* beep on every auto-accepted edit, which in a
+high-throughput session is a lot of noise for no signal. The design choice
+here is "never false-positive" over "best coverage." If your workflow
+manually approves every edit (auto-accept off), the trade-off may flip — add
+this to `~/.cursor/hooks.json` and you'll get edit-gate beeps too:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "./hooks/attention-beep.sh stop",
+        "matcher": "^(Write|StrReplace|Edit|EditNotebook)$",
+        "timeout": 5
+      }
+    ],
+    "beforeMCPExecution": [
+      { "command": "./hooks/attention-beep.sh stop", "timeout": 5 }
+    ]
+  }
+}
+```
+
+(`stop` is reused as the mode arg because all those events should just always
+beep — no per-event filter needed.)
+
+If Cursor adds a real `notification` / `permissionRequest` event, this hook
+should switch to it and the trade-off disappears.
+
 ## Roadmap (no promises)
 
 - Linux / Windows audio backends (`paplay`, `ffplay`, PowerShell `MediaPlayer`).
