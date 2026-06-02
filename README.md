@@ -1,10 +1,16 @@
 # cursor-attention-beep
 
 A small, observe-only Cursor hook that plays a macOS system sound whenever the
-agent might need your attention: end of a turn, a likely-gated shell command
-(`curl`, `ssh`, `sudo`, package managers, anything with an `http(s)://` URL),
-or an MCP tool call. Edit-gate coverage is available as a one-snippet opt-in
-because it tends to fire on every auto-accepted edit too.
+agent might need your attention: end of a turn, a truly elevated shell command
+(`sudo`, `ssh`, `scp`, `sftp`, `rsync`, `nc`, `ncat`, `telnet`, `chmod`,
+`chown`), or an MCP tool call. Edit-gate coverage is available as a
+one-snippet opt-in because it tends to fire on every auto-accepted edit too.
+
+The shell list is intentionally narrow and was tuned from real
+multi-agent session data: package managers (`npm`/`pnpm`/`yarn`/`pip`/`uv`),
+`git`, `curl`/`wget`, and diagnostic tools (`dig`/`ping`/etc.) are
+*excluded* because agents run them constantly and they're typically
+auto-approved. See `ATTENTION_BEEP_PATTERN` below if you want them back.
 
 It is intentionally small (one shell script, one JSON file) and **never prints
 a permission decision**, so Cursor's normal approval prompts are unchanged. The
@@ -28,7 +34,7 @@ How it differs from neighbors:
 | [`NazarenoL/cursor-but-fun`](https://github.com/NazarenoL/cursor-but-fun) | Cursor | yes | switches apps to a game while you wait |
 | [`beautyfree/cursor-activate-hook`](https://github.com/beautyfree/cursor-window-activate-hook) | Cursor | yes | window focus, not sound |
 | [`fsalmons/claude-chime`](https://github.com/fsalmons/claude-chime), [`EryouHao/claude-code-sound-notification`](https://github.com/EryouHao/claude-code-sound-notification), [`ChanMeng666/claude-code-audio-hooks`](https://github.com/ChanMeng666/claude-code-audio-hooks) | Claude Code | no | mature, Claude-only |
-| **cursor-attention-beep** | Cursor only | n/a | minimal, single sound, observe-only; turn-end + network-shell + MCP by default, edit-gates opt-in |
+| **cursor-attention-beep** | Cursor only | n/a | minimal, single sound, observe-only; turn-end + truly-elevated shell + MCP by default, edit-gates opt-in |
 
 If you want voice packs / multi-IDE support / dashboards, use PeonPing. If you
 want one short script that pings when it probably matters and stays out of
@@ -45,7 +51,7 @@ below) because in practice it fires on every auto-accepted edit too.
 | Event | Mode | When it beeps | Default |
 | --- | --- | --- | --- |
 | `stop` | `stop` | Agent finishes a turn (including when it ends because it can't proceed without your input) | on |
-| `beforeShellExecution` | `shell` | About to run a shell command whose `.command` matches the network/elevated regex (`curl`, `wget`, `ssh`, `scp`, `sftp`, `rsync`, `nc`, `ncat`, `telnet`, `sudo`, `git`, `npm`, `pnpm`, `yarn`, `pip`, `pip3`, `uv`, `brew`, `apt`, `apt-get`, `docker`, `dig`, `ping`, `nslookup`, `host`, or any `http(s)://` URL) | on |
+| `beforeShellExecution` | `shell` | About to run a shell command that *starts* (or starts a sub-command after `;`, `\|`, `\|\|`, `&&`) with one of: `sudo`, `ssh`, `scp`, `sftp`, `rsync`, `nc`, `ncat`, `telnet`, `chmod`, `chown`. Tokens in arguments do not match (e.g. `cat ~/.ssh/config` stays silent). | on |
 | `beforeMCPExecution` | `mcp` | About to call an MCP tool | on |
 | `preToolUse` | `edit` | About to use `Write` / `Edit` / `MultiEdit` / `StrReplace` / `EditNotebook` | **opt-in** -- see below |
 

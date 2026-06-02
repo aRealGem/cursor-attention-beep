@@ -8,11 +8,20 @@
 #
 # Invocation modes (mode = arg 1):
 #   stop    play sound. Use in: `stop`
-#   shell   play sound iff stdin .command matches the network/elevated
-#           regex. Use in: `beforeShellExecution`
+#   shell   play sound iff stdin .command starts (or starts a sub-command
+#           after ;, |, ||, &&) with a truly elevated token. Use in:
+#           `beforeShellExecution`
 #   edit    play sound (matcher in hooks.json filters which tools).
 #           Use in: `preToolUse`
 #   mcp     play sound. Use in: `beforeMCPExecution`
+#
+# Default shell tokens that beep:
+#   sudo, ssh, scp, sftp, rsync, nc, ncat, telnet, chmod, chown
+# Specifically EXCLUDED (tuned out of v0.3.1 based on real-session noise
+# data -- agents run these constantly and they're typically
+# auto-approved):
+#   git, npm, pnpm, yarn, pip, pip3, uv, brew, apt, apt-get, docker,
+#   dig, ping, nslookup, host, curl, wget, http(s):// URLs.
 #
 # Customization via env vars:
 #   ATTENTION_BEEP_SOUND          full path to a sound file
@@ -23,8 +32,7 @@
 #   ATTENTION_BEEP_DISABLE_EDIT=1
 #   ATTENTION_BEEP_DISABLE_MCP=1  per-event kill switches
 #   ATTENTION_BEEP_PATTERN        override the shell-match regex entirely
-#                                 (extended regex; default favors network +
-#                                 sudo + package managers)
+#                                 (extended regex)
 
 set -u
 mode="${1:-}"
@@ -44,7 +52,11 @@ play() {
   fi
 }
 
-DEFAULT_PATTERN='(^|[^[:alnum:]_])(curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sudo|git|npm|pnpm|yarn|pip|pip3|uv|brew|apt|apt-get|docker|dig|ping|nslookup|host)([^[:alnum:]_]|$)|https?://'
+# Anchor matches to the start of a (sub-)command -- start of string, or
+# after ; | || && (optionally surrounded by whitespace). This stops
+# arguments like ~/.ssh/config (containing "ssh") from triggering the
+# `ssh` token when the actual command is just `cat` or `grep`.
+DEFAULT_PATTERN='(^|[[:space:]]*(\|\||&&|;|\|)[[:space:]]*)(sudo|ssh|scp|sftp|rsync|nc|ncat|telnet|chmod|chown)([^[:alnum:]_]|$)'
 PATTERN="${ATTENTION_BEEP_PATTERN:-$DEFAULT_PATTERN}"
 
 case "$mode" in
