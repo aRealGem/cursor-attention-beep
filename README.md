@@ -75,12 +75,15 @@ It's still useful in two cases:
 - You routinely watch agents touch paths outside the workspace (e.g.
   `~/.cursor/`, dotfiles, sibling repos) where approval is always required.
 
-To enable, add this entry to `~/.cursor/hooks.json` under `hooks`:
+To enable, add this entry to `~/.cursor/hooks.json` under `hooks`. Use the
+**absolute** path to your installed script (`hooks.json` does not expand `~`
+or env vars, and Cursor does not guarantee the cwd it runs hooks from, so a
+relative path silently fails):
 
 ```json
 "preToolUse": [
   {
-    "command": "./hooks/attention-beep.sh edit",
+    "command": "/Users/you/.cursor/hooks/attention-beep.sh edit",
     "matcher": "^(Write|Edit|MultiEdit|StrReplace|EditNotebook)$",
     "timeout": 5
   }
@@ -107,10 +110,14 @@ cd cursor-attention-beep
 The installer:
 
 1. Copies `hooks/attention-beep.sh` -> `~/.cursor/hooks/attention-beep.sh` (`chmod +x`).
-2. If `~/.cursor/hooks.json` already exists, backs it up to
-   `hooks.json.<UTC>.bak` and **merges** the four entries in (idempotent;
+2. Renders each hook command with the **absolute** path to that installed
+   script. `hooks.json` has no `~`/env-var expansion and Cursor does not
+   guarantee the cwd it spawns hooks from, so relative paths silently fail
+   in any window whose cwd is not `~/.cursor/` (fixed in v0.3.2).
+3. If `~/.cursor/hooks.json` already exists, backs it up to
+   `hooks.json.<UTC>.bak` and **merges** the three entries in (idempotent;
    re-running won't duplicate them; other hooks in your file are preserved).
-3. If it doesn't exist, copies the template.
+4. If it doesn't exist, creates it.
 
 Dry-run first if you want: `./install.sh --dry-run`.
 
@@ -138,11 +145,12 @@ Available system sounds: `Basso`, `Blow`, `Bottle`, `Frog`, `Funk`, `Glass`,
 ## Manual testing
 
 ```bash
-echo '{"command":"curl https://example.com"}' | ~/.cursor/hooks/attention-beep.sh shell  # beep
-echo '{"command":"ls -la"}'                   | ~/.cursor/hooks/attention-beep.sh shell  # silent
-~/.cursor/hooks/attention-beep.sh stop </dev/null                                         # beep
-~/.cursor/hooks/attention-beep.sh mcp  </dev/null                                         # beep
-~/.cursor/hooks/attention-beep.sh edit </dev/null                                         # beep (mode kept for opt-in users)
+echo '{"command":"ssh host hostname"}' | ~/.cursor/hooks/attention-beep.sh shell  # beep
+echo '{"command":"git status"}'        | ~/.cursor/hooks/attention-beep.sh shell  # silent
+echo '{"command":"ls -la"}'            | ~/.cursor/hooks/attention-beep.sh shell  # silent
+~/.cursor/hooks/attention-beep.sh stop </dev/null                                  # beep
+~/.cursor/hooks/attention-beep.sh mcp  </dev/null                                  # beep
+~/.cursor/hooks/attention-beep.sh edit </dev/null                                  # beep (mode kept for opt-in users)
 ```
 
 ## Uninstall

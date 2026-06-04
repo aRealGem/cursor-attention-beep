@@ -105,41 +105,64 @@ else
   echo "    installed $SCRIPT_DST"
 fi
 
+# Render hook commands with the ABSOLUTE path to the installed script.
+# hooks.json has no env-var/tilde expansion, and Cursor does not
+# guarantee the cwd it spawns hooks from (it varies by workspace), so a
+# relative "./hooks/attention-beep.sh" silently fails in any window whose
+# cwd is not ~/.cursor/. Absolute paths work regardless of cwd.
+CMD_STOP="$SCRIPT_DST stop"
+CMD_SHELL="$SCRIPT_DST shell"
+CMD_MCP="$SCRIPT_DST mcp"
+
+# Seed used for a fresh install (no existing hooks.json). Reuses the
+# exact same merge program below so both paths render identical output.
+SEED='{"version":1,"hooks":{}}'
+
+# Merge entries idempotently:
+#   1. Strip every existing "attention-beep" entry from every event
+#      list (cleans stale/relative entries from prior versions, and any
+#      event keys we no longer install -- e.g. preToolUse from v0.2).
+#   2. Drop event lists that become empty after the strip.
+#   3. Add exactly one attention-beep entry per event we ship, each with
+#      an absolute command path.
+# Existing non-attention-beep entries on any event key are preserved.
+merge_program='
+  def ensure(key; cmd):
+    .hooks[key] = ((.hooks[key] // []) + [{command: cmd, timeout: 5}]);
+  .version = (.version // 1)
+  | .hooks = (.hooks // {})
+  | .hooks = (
+      .hooks
+      | to_entries
+      | map(.value |= ((. // []) | map(select(.command | test("attention-beep") | not))))
+      | map(select(.value | length > 0))
+      | from_entries
+    )
+  | ensure("stop";                 $cmd_stop)
+  | ensure("beforeShellExecution"; $cmd_shell)
+  | ensure("beforeMCPExecution";   $cmd_mcp)
+'
+
 if [[ ! -f "$HOOKS_JSON" ]]; then
+  rendered="$(printf '%s' "$SEED" | jq \
+    --arg cmd_stop "$CMD_STOP" \
+    --arg cmd_shell "$CMD_SHELL" \
+    --arg cmd_mcp "$CMD_MCP" \
+    "$merge_program")"
   if [[ $DRY -eq 1 ]]; then
-    echo "    would create $HOOKS_JSON from repo template"
+    echo "    would create $HOOKS_JSON:"
+    printf '%s\n' "$rendered" | sed 's/^/      /'
   else
-    cp "$REPO_DIR/hooks.json" "$HOOKS_JSON"
+    printf '%s\n' "$rendered" > "$HOOKS_JSON"
     echo "    created $HOOKS_JSON"
   fi
 else
   backup_hooks_json
-  # Merge entries idempotently:
-  #   1. Strip every existing "attention-beep" entry from every event
-  #      list (cleans stale entries from prior versions on event keys we
-  #      no longer install -- e.g. preToolUse from v0.2).
-  #   2. Drop event lists that become empty after the strip.
-  #   3. Add exactly one attention-beep entry per event the current
-  #      template ships.
-  # Existing non-attention-beep entries on any event key are preserved.
-  merged="$(jq --slurpfile tmpl "$REPO_DIR/hooks.json" '
-    def ensure(key; entry):
-      .hooks[key] = ((.hooks[key] // []) + [entry]);
-    .version = (.version // 1)
-    | .hooks = (.hooks // {})
-    # 1+2: scrub every existing attention-beep entry, drop empties.
-    | .hooks = (
-        .hooks
-        | to_entries
-        | map(.value |= ((. // []) | map(select(.command | test("attention-beep") | not))))
-        | map(select(.value | length > 0))
-        | from_entries
-      )
-    # 3: re-add exactly the entries this template ships.
-    | ensure("stop";                 $tmpl[0].hooks.stop[0])
-    | ensure("beforeShellExecution"; $tmpl[0].hooks.beforeShellExecution[0])
-    | ensure("beforeMCPExecution";   $tmpl[0].hooks.beforeMCPExecution[0])
-  ' "$HOOKS_JSON")"
+  merged="$(jq \
+    --arg cmd_stop "$CMD_STOP" \
+    --arg cmd_shell "$CMD_SHELL" \
+    --arg cmd_mcp "$CMD_MCP" \
+    "$merge_program" "$HOOKS_JSON")"
 
   if [[ $DRY -eq 1 ]]; then
     echo "    would write merged $HOOKS_JSON:"
@@ -157,11 +180,11 @@ cat <<EOF
        stop, beforeShellExecution, beforeMCPExecution).
     2. End an agent turn -- you should hear Sosumi.
     3. Manual tests:
-         echo '{"command":"curl https://example.com"}' | $SCRIPT_DST shell  # beep
-         echo '{"command":"ls"}'                       | $SCRIPT_DST shell  # silent
-         $SCRIPT_DST stop </dev/null                                        # beep
-         $SCRIPT_DST mcp  </dev/null                                        # beep
-         $SCRIPT_DST edit </dev/null                                        # beep (only if you opt in -- see README)
+         echo '{"command":"ssh host hostname"}' | $SCRIPT_DST shell  # beep
+         echo '{"command":"git status"}'        | $SCRIPT_DST shell  # silent
+         $SCRIPT_DST stop </dev/null                                 # beep
+         $SCRIPT_DST mcp  </dev/null                                 # beep
+         $SCRIPT_DST edit </dev/null                                 # beep (only if you opt in -- see README)
 
 ==> turn parts off via env vars in your shell profile:
       ATTENTION_BEEP_DISABLE=1         # master kill switch

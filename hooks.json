@@ -1,14 +1,15 @@
 {
+  "_comment": "Reference template only. Do NOT copy this file to ~/.cursor/hooks.json verbatim -- the __SCRIPT__ placeholder must be the ABSOLUTE path to the installed script. Run ./install.sh, which renders __SCRIPT__ -> $HOME/.cursor/hooks/attention-beep.sh. Cursor does not guarantee the cwd it spawns hooks from, so relative paths silently fail.",
   "version": 1,
   "hooks": {
     "stop": [
-      { "command": "./hooks/attention-beep.sh stop", "timeout": 5 }
+      { "command": "__SCRIPT__ stop", "timeout": 5 }
     ],
     "beforeShellExecution": [
-      { "command": "./hooks/attention-beep.sh shell", "timeout": 5 }
+      { "command": "__SCRIPT__ shell", "timeout": 5 }
     ],
     "beforeMCPExecution": [
-      { "command": "./hooks/attention-beep.sh mcp", "timeout": 5 }
+      { "command": "__SCRIPT__ mcp", "timeout": 5 }
     ]
   }
 }
