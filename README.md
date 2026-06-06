@@ -138,6 +138,8 @@ All knobs are environment variables; set them in your shell profile (e.g.
 | `ATTENTION_BEEP_DISABLE_MCP` | unset | Silence MCP-call beeps |
 | `ATTENTION_BEEP_SOUND` | `/System/Library/Sounds/Sosumi.aiff` | Any `.aiff` / `.wav` / `.mp3` path that `afplay` accepts |
 | `ATTENTION_BEEP_PATTERN` | see source | Override the shell-match extended regex entirely |
+| `ATTENTION_BEEP_NOTIFY` | unset | `=1` also posts a macOS notification banner alongside the sound (visual fallback for the post-wake audio bug; uses `terminal-notifier` if installed, else `osascript`) |
+| `ATTENTION_BEEP_LOG` | unset | If set to a writable path, appends one line per beep: `ISO8601 mode afplay_exit=N`. Useful for diagnosing "hook fired but silent" vs "hook never fired" |
 
 Available system sounds: `Basso`, `Blow`, `Bottle`, `Frog`, `Funk`, `Glass`,
 `Hero`, `Morse`, `Ping`, `Pop`, `Purr`, `Sosumi`, `Submarine`, `Tink`.
@@ -152,6 +154,47 @@ echo '{"command":"ls -la"}'            | ~/.cursor/hooks/attention-beep.sh shell
 ~/.cursor/hooks/attention-beep.sh mcp  </dev/null                                  # beep
 ~/.cursor/hooks/attention-beep.sh edit </dev/null                                  # beep (mode kept for opt-in users)
 ```
+
+## Troubleshooting: silent after wake from sleep
+
+If the beep stops working after your Mac wakes from sleep (display
+sleep or full sleep), you're almost certainly hitting a known macOS
+`coreaudiod` bug: `afplay` runs and exits 0, but the audio driver
+hasn't re-attached the default output, so nothing reaches the
+speakers. The hook can't detect this from the exit code alone -- it
+looks like a successful play.
+
+What this repo does about it:
+
+- `play()` is resilient to *failed* `afplay` invocations -- on a
+  non-zero exit it waits briefly and retries, then falls back to
+  `osascript -e 'beep 2'`. This covers the "audio system briefly not
+  ready" variant.
+- For the harder "exit 0 but silent" variant, two opt-in env vars help:
+  - `ATTENTION_BEEP_NOTIFY=1` -- post a macOS notification banner
+    alongside every beep. Banners use a different subsystem than
+    `afplay` and tend to survive the post-wake bug. Pair with sound
+    rather than replacing it.
+  - `ATTENTION_BEEP_LOG=$HOME/.cursor/hooks/attention-beep.log` -- log
+    one line per invocation so you can confirm whether the hook fired
+    (and what `afplay` returned) the next time it goes quiet.
+
+Manual remedy when audio is actually wedged (one of these usually
+works; the first is least disruptive):
+
+```bash
+sudo launchctl kickstart -kp system/com.apple.audio.coreaudiod
+# or:
+sudo launchctl stop  com.apple.audio.coreaudiod && \
+sudo launchctl start com.apple.audio.coreaudiod
+# or, quick System Settings -> Sound -> Output: switch output device away and back
+```
+
+Inherent limitation: during *full* system sleep nothing runs (Cursor
+itself is suspended), so a beep that wakes you while the Mac is asleep
+is not possible from a Cursor hook. This troubleshooting targets the
+"display asleep / locked / just-woke" cases where the agent is still
+running and the only thing broken is the audio output.
 
 ## Uninstall
 
